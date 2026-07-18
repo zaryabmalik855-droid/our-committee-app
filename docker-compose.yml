@@ -1,0 +1,67 @@
+version: '3.9'
+
+services:
+  # ── AI Backend (FastAPI) ────────────────────────────────────────
+  backend:
+    build: ./backend
+    container_name: committee_ai_backend
+    ports:
+      - "8000:7860"
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql://committee:committee_pass@db:5432/committee_ai
+      - CHROMA_PERSIST_DIR=/data/chroma
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=our-committee-ai
+    volumes:
+      - chroma_data:/data/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── PostgreSQL Database + pgvector ──────────────────────────────
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: committee_db
+    environment:
+      - POSTGRES_USER=committee
+      - POSTGRES_PASSWORD=committee_pass
+      - POSTGRES_DB=committee_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U committee -d committee_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Streamlit AI Demo Frontend ──────────────────────────────────
+  streamlit:
+    build: ./streamlit_app
+    container_name: committee_ai_streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:7860
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+    driver: local
+  pgdata:
+    driver: local
